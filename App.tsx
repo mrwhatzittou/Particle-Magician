@@ -42,6 +42,7 @@ const App: React.FC = () => {
   const [lightAction, setLightAction] = useState<LightAction>(LightAction.NONE);
 
   // Refs
+  const currentShapeRef = useRef<ShapeType>(ShapeType.SPHERE); // Fix for Stale Closure
   const openHandStartTimeRef = useRef<number>(0);
   const supernovaTimeoutRef = useRef<number | null>(null);
   const lastGestureRef = useRef<string | null>(null);
@@ -53,6 +54,11 @@ const App: React.FC = () => {
   const GESTURE_BUFFER_SIZE = 8; 
   const trackingTimeoutRef = useRef<number | null>(null);
   const TRACKING_GRACE_PERIOD = 500; 
+
+  // Sync state to ref
+  useEffect(() => {
+      currentShapeRef.current = currentShape;
+  }, [currentShape]);
 
   const handleStart = async (userConfig: AppConfig) => {
     setConfig(userConfig);
@@ -88,6 +94,13 @@ const App: React.FC = () => {
       audioService.setMute(newState);
   };
 
+  const changeShape = (newShape: ShapeType) => {
+      setCurrentShape(newShape);
+      audioService.setShape(newShape); 
+      audioService.playWhoosh();
+  };
+
+  // Memoized Callback - Now uses Refs for mutable state to avoid stale closures
   const handleVisionResults = useCallback((results: any) => {
     // 1. Process Dual Hands
     const { rightHand, leftHand }: DualHandResult = visionService.processDualHands(results);
@@ -147,7 +160,8 @@ const App: React.FC = () => {
 
                 const threshold = Math.ceil(GESTURE_BUFFER_SIZE * 0.7); 
                 for (const [s, count] of Object.entries(counts)) {
-                    if (count >= threshold && s !== currentShape) {
+                    // Use Ref here to check against the *actual* current shape, not the stale one
+                    if ((count as number) >= threshold && s !== currentShapeRef.current) {
                         changeShape(s as ShapeType);
                         break;
                     }
@@ -171,7 +185,7 @@ const App: React.FC = () => {
     }
 
     // 5. UI Updates
-    if (!isSupernovaActiveRef.current && currentShape !== ShapeType.SPIRAL_GALAXY) {
+    if (!isSupernovaActiveRef.current && currentShapeRef.current !== ShapeType.SPIRAL_GALAXY) {
          let status = 'Tracking';
          if (leftHand.active && rightHand.active) status = 'Dual Control';
          else if (leftHand.active) status = leftHand.isPinching ? 'Rotation Locked' : 'Rotating & Zooming';
@@ -183,7 +197,7 @@ const App: React.FC = () => {
          setDetectedGesture(status);
     } 
 
-  }, [currentShape]);
+  }, []); // Empty dependency array ensures this function is stable and never recreated
 
   const triggerSupernova = () => {
       if (isSupernovaActiveRef.current) return;
@@ -214,12 +228,6 @@ const App: React.FC = () => {
   const handleMouseUp = () => {
       if (isCameraActive) return;
       setIsInteracting(false);
-  };
-
-  const changeShape = (newShape: ShapeType) => {
-      setCurrentShape(newShape);
-      audioService.setShape(newShape); 
-      audioService.playWhoosh();
   };
 
   return (
