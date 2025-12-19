@@ -1,0 +1,7 @@
+{
+  "name": "Particle Magician",
+  "description": "An interactive 3D particle system controlled by hand gestures and mouse input, featuring generative audio and smooth shape morphing.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
