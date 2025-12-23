@@ -1,263 +1,176 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ShapeType, AppConfig, Mood, ColorMode, ColorTheme, LightAction } from './types';
-import { SHAPE_CONFIGS } from './constants';
+import { DEFAULT_PRESETS, MOOD_DEFAULTS, SHAPE_POOL } from './constants';
 import Canvas3D from './components/Canvas3D';
 import UIOverlay from './components/UIOverlay';
 import { audioService } from './services/audioService';
-import { visionService, DualHandResult } from './services/visionService';
+import { visionService, DualHandResult, VisionStatus } from './services/visionService';
 
 const DEFAULT_CONFIG: AppConfig = {
     mood: Mood.CALM,
     motionStyle: 'FLOATING',
     glowIntensity: 'SOFT',
     soundPresence: 'MINIMAL',
-    colorTemp: 'COOL'
+    colorTemp: 'COOL',
+    shapePresets: [...DEFAULT_PRESETS],
+    particleSpeed: 1.0
 };
 
 const App: React.FC = () => {
   const [hasStarted, setHasStarted] = useState(false);
   const [currentShape, setCurrentShape] = useState<ShapeType>(ShapeType.SPHERE);
   const [isCameraActive, setIsCameraActive] = useState(false);
-  const [isVideoLoading, setIsVideoLoading] = useState(false);
+  const [visionStatus, setVisionStatus] = useState<VisionStatus>('STARTING');
   const [isMuted, setIsMuted] = useState(false);
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
   
-  // DUAL INTERACTION STATE
-  const [interactionPoint, setInteractionPoint] = useState({ x: 0, y: 0 }); // RIGHT HAND
-  const [rotationPoint, setRotationPoint] = useState<{ x: number, y: number } | null>(null); // LEFT HAND
-  const [isInteracting, setIsInteracting] = useState(false); // RIGHT HAND PINCH
+  const [interactionPoint, setInteractionPoint] = useState({ x: 0, y: 0 }); 
+  const [rotationPoint, setRotationPoint] = useState<{ x: number, y: number } | null>(null); 
+  const [isInteracting, setIsInteracting] = useState(false); 
   
-  // LEFT HAND EXTENDED STATE
   const [leftHandPinch, setLeftHandPinch] = useState(false);
-  const [leftHandZoom, setLeftHandZoom] = useState(0.4);
-
-  const [detectedGesture, setDetectedGesture] = useState('Wait...');
-  
+  const [detectedGesture, setDetectedGesture] = useState('Idle');
   const [zoomLevel, setZoomLevel] = useState(0.4); 
   
-  // NEW VISUAL STATE
   const [colorMode, setColorMode] = useState<ColorMode>(ColorMode.GRADIENT);
   const [colorTheme, setColorTheme] = useState<ColorTheme>(ColorTheme.NEBULA_PINK);
   const [lightAction, setLightAction] = useState<LightAction>(LightAction.NONE);
+  const [particleSpeed, setParticleSpeed] = useState(1.0);
 
-  // Refs
-  const currentShapeRef = useRef<ShapeType>(ShapeType.SPHERE); // Fix for Stale Closure
-  const openHandStartTimeRef = useRef<number>(0);
-  const supernovaTimeoutRef = useRef<number | null>(null);
-  const lastGestureRef = useRef<string | null>(null);
-  const isSupernovaActiveRef = useRef(false);
+  const currentShapeRef = useRef<ShapeType>(ShapeType.SPHERE); 
+  const presetsRef = useRef<ShapeType[]>(DEFAULT_PRESETS);
+  const isInteractingRef = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   
-  // Tracking Continuity
-  const gestureBufferRef = useRef<ShapeType[]>([]);
-  const GESTURE_BUFFER_SIZE = 8; 
-  const trackingTimeoutRef = useRef<number | null>(null);
-  const TRACKING_GRACE_PERIOD = 500; 
+  const shapeCooldownRef = useRef(false);
+  const activePresetRef = useRef<number | null>(null);
 
-  // Sync state to ref
   useEffect(() => {
       currentShapeRef.current = currentShape;
   }, [currentShape]);
 
-  const handleStart = async (userConfig: AppConfig) => {
-    setConfig(userConfig);
-    setHasStarted(true);
-    
-    // Set initial theme based on Mood (Personalization)
-    if (userConfig.mood === Mood.CALM) setColorTheme(ColorTheme.NEBULA_PINK);
-    if (userConfig.mood === Mood.DREAMLIKE) setColorTheme(ColorTheme.AURORA);
-    if (userConfig.mood === Mood.ENERGIZED) setColorTheme(ColorTheme.SUNSET);
+  useEffect(() => {
+      presetsRef.current = config.shapePresets;
+  }, [config.shapePresets]);
 
-    audioService.configure(userConfig);
-    await audioService.start();
+  useEffect(() => {
+      if (hasStarted && isInteracting !== isInteractingRef.current) {
+          audioService.triggerInteractionPing(isInteracting, interactionPoint.x);
+          isInteractingRef.current = isInteracting;
+      }
+  }, [isInteracting, hasStarted, interactionPoint.x]);
 
-    setIsVideoLoading(true);
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            visionService.start(videoRef.current, handleVisionResults);
-            setIsCameraActive(true);
-        }
-    } catch (err) {
-        console.warn("Camera permission denied or unavailable. Falling back to mouse.", err);
-        setIsCameraActive(false);
-    } finally {
-        setIsVideoLoading(false);
-    }
-  };
-
-  const toggleMute = () => {
-      const newState = !isMuted;
-      setIsMuted(newState);
-      audioService.setMute(newState);
-  };
-
-  const changeShape = (newShape: ShapeType) => {
+  const changeShape = useCallback((newShape: ShapeType) => {
+      // Cooldown check to prevent flickering
+      if (shapeCooldownRef.current) return;
+      
       setCurrentShape(newShape);
       audioService.setShape(newShape); 
       audioService.playWhoosh();
-  };
+      
+      shapeCooldownRef.current = true;
+      // Increased cooldown window to 800ms for stability
+      setTimeout(() => { shapeCooldownRef.current = false; }, 800);
+  }, []);
 
-  // Memoized Callback - Now uses Refs for mutable state to avoid stale closures
   const handleVisionResults = useCallback((results: any) => {
-    // 1. Process Dual Hands
-    const { rightHand, leftHand }: DualHandResult = visionService.processDualHands(results);
+    const result: DualHandResult = visionService.processDualHands(results);
+    setVisionStatus(result.status);
 
-    // 2. Tracking Continuity Logic
-    if (!rightHand.active && !leftHand.active) {
-        if (!trackingTimeoutRef.current) {
-            trackingTimeoutRef.current = window.setTimeout(() => {
-                setDetectedGesture('No Hands');
-                setIsInteracting(false);
-                setRotationPoint(null); 
-                setLeftHandPinch(false);
-            }, TRACKING_GRACE_PERIOD);
+    // --- RIGHT HAND: Shape Presets Only ---
+    if (result.rightHand.active) {
+        setInteractionPoint(result.rightHand.cursor);
+        setIsInteracting(false);
+
+        const fingerCount = result.rightHand.fingerCount;
+        // Strict confidence: visionService already returns stable count or null
+        if (fingerCount !== null && fingerCount >= 1 && fingerCount <= 5) {
+            const targetShape = presetsRef.current[fingerCount - 1];
+            if (targetShape && targetShape !== currentShapeRef.current) {
+                changeShape(targetShape);
+            }
+            activePresetRef.current = fingerCount;
+        } else {
+            activePresetRef.current = null;
         }
     } else {
-        if (trackingTimeoutRef.current) {
-            clearTimeout(trackingTimeoutRef.current);
-            trackingTimeoutRef.current = null;
-        }
+        setIsInteracting(false);
+        activePresetRef.current = null;
     }
 
-    // 3. RIGHT HAND: Interaction & Shape
-    if (rightHand.active) {
-        setInteractionPoint(rightHand.cursor);
-        setIsInteracting(rightHand.isPinching);
-
-        // --- EASTER EGG: SUPERNOVA ---
-        if (rightHand.shape === ShapeType.FIREWORKS && !isSupernovaActiveRef.current) {
-            if (lastGestureRef.current !== ShapeType.FIREWORKS) {
-                openHandStartTimeRef.current = Date.now();
-            } else {
-                const elapsed = Date.now() - openHandStartTimeRef.current;
-                if (elapsed > 5000) {
-                    triggerSupernova();
-                }
-            }
-        } else {
-            openHandStartTimeRef.current = 0; 
-        }
-        lastGestureRef.current = rightHand.shape;
-
-        // --- SHAPE SWITCHING (RIGHT HAND ONLY) ---
-        // CRITICAL UPDATE: FREEZE SHAPE DETECTION WHILE PINCHING
-        // This prevents the shape from breaking when the user pinches (which looks like 2 fingers).
-        if (!isSupernovaActiveRef.current && !rightHand.isPinching) {
-             if (rightHand.shape) {
-                gestureBufferRef.current.push(rightHand.shape);
-                if (gestureBufferRef.current.length > GESTURE_BUFFER_SIZE) {
-                    gestureBufferRef.current.shift();
-                }
-
-                // Majority Vote
-                const counts = gestureBufferRef.current.reduce((acc, curr) => {
-                    acc[curr] = (acc[curr] || 0) + 1;
-                    return acc;
-                }, {} as Record<string, number>);
-
-                const threshold = Math.ceil(GESTURE_BUFFER_SIZE * 0.7); 
-                for (const [s, count] of Object.entries(counts)) {
-                    // Use Ref here to check against the *actual* current shape, not the stale one
-                    if ((count as number) >= threshold && s !== currentShapeRef.current) {
-                        changeShape(s as ShapeType);
-                        break;
-                    }
-                }
-            }
-        } else {
-            // While pinching, we clear buffer to ensure stability upon release
-            gestureBufferRef.current = [];
-        }
-    }
-
-    // 4. LEFT HAND: Rotation, Zoom, Lock
-    if (leftHand.active) {
-        setRotationPoint(leftHand.cursor);
-        setLeftHandPinch(leftHand.isPinching);
-        setLeftHandZoom(leftHand.handSize);
+    // --- LEFT HAND: Rotation and Zoom Only ---
+    if (result.leftHand.active) {
+        setRotationPoint(result.leftHand.cursor);
+        setLeftHandPinch(result.leftHand.isLocked);
+        setZoomLevel(result.leftHand.handSize);
+        setDetectedGesture(result.leftHand.motionStatus);
     } else {
-        // If left hand lost, rotation point becomes null (Canvas3D will hold last value)
         setRotationPoint(null);
         setLeftHandPinch(false);
+        setDetectedGesture('Idle');
     }
+    
+  }, [changeShape]);
 
-    // 5. UI Updates
-    if (!isSupernovaActiveRef.current && currentShapeRef.current !== ShapeType.SPIRAL_GALAXY) {
-         let status = 'Tracking';
-         if (leftHand.active && rightHand.active) status = 'Dual Control';
-         else if (leftHand.active) status = leftHand.isPinching ? 'Rotation Locked' : 'Rotating & Zooming';
-         else if (rightHand.active) status = 'Interacting';
-         
-         const shapeLabel = SHAPE_CONFIGS.find(c => c.type === rightHand.shape)?.label;
-         if (shapeLabel) status = `${shapeLabel} ${rightHand.isPinching ? '(Pinch)' : ''}`;
-         
-         setDetectedGesture(status);
-    } 
+  const handleStart = async (userConfig: AppConfig) => {
+    const defaults = MOOD_DEFAULTS[userConfig.mood];
+    const finalConfig = { ...userConfig, particleSpeed: defaults.particleSpeed, shapePresets: defaults.shapePresets };
+    
+    setConfig(finalConfig);
+    setHasStarted(true);
+    setParticleSpeed(defaults.particleSpeed);
+    setColorMode(defaults.colorMode);
+    setColorTheme(defaults.colorTheme);
+    setLightAction(defaults.lightAction);
+    setCurrentShape(defaults.shapePresets[0]);
 
-  }, []); // Empty dependency array ensures this function is stable and never recreated
+    audioService.configure(finalConfig);
+    audioService.start();
 
-  const triggerSupernova = () => {
-      if (isSupernovaActiveRef.current) return;
-      isSupernovaActiveRef.current = true;
-      setDetectedGesture('SUPERNOVA EVENT');
-      changeShape(ShapeType.SUPERNOVA);
-      
-      if (supernovaTimeoutRef.current) clearTimeout(supernovaTimeoutRef.current);
-      supernovaTimeoutRef.current = window.setTimeout(() => {
-          isSupernovaActiveRef.current = false;
-          changeShape(ShapeType.SPHERE); 
-      }, 3000);
+    if (videoRef.current) {
+        navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+                visionService.start(videoRef.current, handleVisionResults);
+                setIsCameraActive(true);
+            }
+        }).catch(() => {
+            setVisionStatus('ERROR');
+            setIsCameraActive(false);
+        });
+    }
   };
 
-  // Mouse Fallback (Maps to Interaction Only)
-  const handleMouseMove = (e: React.MouseEvent) => {
-      if (isCameraActive) return; 
-      const x = (e.clientX / window.innerWidth) * 2 - 1;
-      const y = -(e.clientY / window.innerHeight) * 2 + 1;
-      setInteractionPoint({ x, y });
+  const updatePresets = (newPresets: ShapeType[]) => {
+      setConfig(prev => ({ ...prev, shapePresets: newPresets }));
   };
 
-  const handleMouseDown = () => {
-      if (isCameraActive) return;
-      setIsInteracting(true);
-  };
-
-  const handleMouseUp = () => {
-      if (isCameraActive) return;
-      setIsInteracting(false);
-  };
+  const currentShapeName = SHAPE_POOL.find(s => s.type === currentShape)?.label || currentShape;
 
   return (
     <div 
         className="relative w-full h-screen bg-black overflow-hidden"
-        onMouseMove={handleMouseMove}
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
-        onTouchStart={handleMouseDown}
-        onTouchEnd={handleMouseUp}
-        onTouchMove={(e) => {
-             if (isCameraActive) return;
-             const touch = e.touches[0];
-             const x = (touch.clientX / window.innerWidth) * 2 - 1;
-             const y = -(touch.clientY / window.innerHeight) * 2 + 1;
-             setInteractionPoint({ x, y });
+        onMouseMove={e => {
+            if (isCameraActive) return;
+            setInteractionPoint({ x: (e.clientX/window.innerWidth)*2-1, y: -(e.clientY/window.innerHeight)*2+1 });
         }}
+        onMouseDown={() => !isCameraActive && setIsInteracting(true)}
+        onMouseUp={() => !isCameraActive && setIsInteracting(false)}
     >
       <Canvas3D 
         currentShape={currentShape} 
         interactionPoint={interactionPoint} 
         rotationPoint={rotationPoint}
         isLeftPinching={leftHandPinch}
-        leftHandZoom={leftHandZoom}
+        leftHandZoom={zoomLevel}
         isInteracting={isInteracting}
         config={config}
         zoomLevel={zoomLevel}
         colorMode={colorMode}
         colorTheme={colorTheme}
         lightAction={lightAction}
+        particleSpeed={particleSpeed}
       />
       
       <UIOverlay 
@@ -265,11 +178,12 @@ const App: React.FC = () => {
         onManualShapeSelect={changeShape}
         detectedGesture={detectedGesture}
         isCameraActive={isCameraActive}
+        visionStatus={visionStatus}
         onStart={handleStart}
         hasStarted={hasStarted}
-        isVideoLoading={isVideoLoading}
+        isVideoLoading={visionStatus === 'STARTING' && hasStarted}
         isMuted={isMuted}
-        onToggleMute={toggleMute}
+        onToggleMute={() => { setIsMuted(!isMuted); audioService.setMute(!isMuted); }}
         zoomLevel={zoomLevel}
         onZoomChange={setZoomLevel}
         colorMode={colorMode}
@@ -278,20 +192,25 @@ const App: React.FC = () => {
         setColorTheme={setColorTheme}
         lightAction={lightAction}
         setLightAction={setLightAction}
+        shapePresets={config.shapePresets}
+        onPresetsChange={updatePresets}
+        particleSpeed={particleSpeed}
+        onParticleSpeedChange={setParticleSpeed}
+        activeMood={config.mood}
+        onResetToMood={m => {
+            const d = MOOD_DEFAULTS[m];
+            setParticleSpeed(d.particleSpeed);
+            setColorMode(d.colorMode);
+            setColorTheme(d.colorTheme);
+            setLightAction(d.lightAction);
+            setConfig(prev => ({ ...prev, mood: m, shapePresets: d.shapePresets }));
+            changeShape(d.shapePresets[0]);
+        }}
+        activePresetIndex={activePresetRef.current}
+        currentShapeName={currentShapeName}
       />
 
-      <video 
-        ref={videoRef} 
-        className={`absolute bottom-4 right-4 w-48 h-36 object-cover rounded-lg border-2 border-violet-500/50 z-40 transition-opacity duration-500 ${isCameraActive && hasStarted ? 'opacity-50 blur-[1px]' : 'opacity-0 pointer-events-none'}`}
-        playsInline 
-        muted
-        style={{ transform: 'scaleX(-1)' }} 
-      />
-      
-      {/* Right Hand Indicator */}
-      {isCameraActive && isInteracting && (
-          <div className="absolute bottom-4 right-4 w-48 h-36 rounded-lg border-2 border-violet-400/50 shadow-[0_0_20px_rgba(139,92,246,0.3)] pointer-events-none z-50 animate-pulse" />
-      )}
+      <video ref={videoRef} className={`absolute bottom-4 right-4 w-48 h-36 object-cover rounded-lg border-2 border-white/10 z-40 transition-opacity duration-500 ${isCameraActive && hasStarted ? 'opacity-30 blur-[2px]' : 'opacity-0 pointer-events-none'}`} playsInline muted style={{ transform: 'scaleX(-1)' }} />
     </div>
   );
 };

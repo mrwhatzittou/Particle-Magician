@@ -1,28 +1,66 @@
 
-import { ShapeType, ColorTheme } from './types';
+import { ShapeType, ColorTheme, Mood, ColorMode, LightAction } from './types';
 
-export const PARTICLE_COUNT = 15000;
+export const PARTICLE_COUNT = 40000;
 
-export const SHAPE_CONFIGS = [
-  { type: ShapeType.SPHERE, label: 'Sphere', gesture: '1 Finger' }, // Default/Fallback
-  { type: ShapeType.FLOWER, label: 'Flower', gesture: '2 Fingers' },
-  { type: ShapeType.SATURN, label: 'Saturn', gesture: '3 Fingers' },
-  { type: ShapeType.HEART, label: 'Heart', gesture: '4 Fingers' },
-  { type: ShapeType.FIREWORKS, label: 'Fireworks', gesture: '5 Fingers' },
+export const DEFAULT_PRESETS: ShapeType[] = [
+  ShapeType.SPHERE,
+  ShapeType.FLOWER,
+  ShapeType.SATURN,
+  ShapeType.HEART,
+  ShapeType.FIREWORKS,
 ];
 
-export const COLORS = {
-  primary: '#8b5cf6', // Violet
-  secondary: '#ec4899', // Pink
-  accent: '#3b82f6', // Blue
+export const SHAPE_POOL = [
+  { type: ShapeType.SPHERE, label: 'Sphere' },
+  { type: ShapeType.FLOWER, label: 'Lotus' },
+  { type: ShapeType.SATURN, label: 'Saturn' },
+  { type: ShapeType.HEART, label: 'Heart' },
+  { type: ShapeType.FIREWORKS, label: 'Fireworks' },
+  { type: ShapeType.SPIRAL_GALAXY, label: 'Galaxy' },
+  { type: ShapeType.BLACK_HOLE, label: 'Black Hole' },
+  { type: ShapeType.VORTEX, label: 'Vortex' },
+  { type: ShapeType.CYLINDER, label: 'Cylinder' },
+  { type: ShapeType.CRYSTAL, label: 'Crystal' },
+];
+
+export const MOOD_DEFAULTS = {
+  [Mood.CALM]: {
+    particleSpeed: 0.25,
+    shapePresets: [ShapeType.SPHERE, ShapeType.FLOWER, ShapeType.SPIRAL_GALAXY, ShapeType.SATURN, ShapeType.FIREWORKS],
+    colorMode: ColorMode.GRADIENT,
+    lightAction: LightAction.NONE,
+    colorTheme: ColorTheme.MONO_ICE,
+  },
+  [Mood.DREAMLIKE]: {
+    particleSpeed: 0.5,
+    shapePresets: [ShapeType.SPIRAL_GALAXY, ShapeType.FLOWER, ShapeType.VORTEX, ShapeType.HEART, ShapeType.CRYSTAL],
+    colorMode: ColorMode.GRADIENT,
+    lightAction: LightAction.FADE,
+    colorTheme: ColorTheme.NEBULA_PINK,
+  },
+  [Mood.ENERGIZED]: {
+    particleSpeed: 2.0,
+    shapePresets: [ShapeType.VORTEX, ShapeType.BLACK_HOLE, ShapeType.FIREWORKS, ShapeType.CYLINDER, ShapeType.SPIRAL_GALAXY],
+    colorMode: ColorMode.MULTI,
+    lightAction: LightAction.FLASH,
+    colorTheme: ColorTheme.SUNSET,
+  }
 };
 
-// NEW: Theme Palettes for Color Control
+export const PARTICLE_SPEED_OPTIONS = [-2, -1, -0.5, -0.25, 0.25, 0.5, 1, 2];
+
+export const COLORS = {
+  primary: '#8b5cf6',
+  secondary: '#ec4899',
+  accent: '#3b82f6',
+};
+
 export const THEME_PALETTES: Record<ColorTheme, {
     primary: string;
     secondary: string;
     accent: string;
-    solid: string; // Used for Solid Mode
+    solid: string;
 }> = {
     [ColorTheme.NEBULA_PINK]: { 
         primary: '#8b5cf6', secondary: '#ec4899', accent: '#d946ef', solid: '#d946ef' 
@@ -45,6 +83,6 @@ export const THEME_PALETTES: Record<ColorTheme, {
 };
 
 export const AUDIO_FREQUENCIES = {
-  base: 55, // A1
+  base: 55,
   modulateMax: 200,
 };

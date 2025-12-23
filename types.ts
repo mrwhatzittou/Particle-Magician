@@ -5,9 +5,11 @@ export enum ShapeType {
   FLOWER = 'FLOWER',
   SATURN = 'SATURN',
   FIREWORKS = 'FIREWORKS',
-  // Hidden Easter Eggs
   SPIRAL_GALAXY = 'SPIRAL_GALAXY',
-  SUPERNOVA = 'SUPERNOVA',
+  BLACK_HOLE = 'BLACK_HOLE',
+  VORTEX = 'VORTEX',
+  CYLINDER = 'CYLINDER',
+  CRYSTAL = 'CRYSTAL',
 }
 
 export interface HandLandmark {
@@ -41,6 +43,8 @@ export interface AppConfig {
   glowIntensity: GlowIntensity;
   soundPresence: SoundPresence;
   colorTemp: ColorTemp;
+  shapePresets: ShapeType[]; // Mapping for 1-5 fingers
+  particleSpeed: number; // Controls animation time scale
 }
 
 // --- NEW VISUAL CONTROLS ---
